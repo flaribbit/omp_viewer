@@ -153,8 +153,10 @@ PAGE = r"""<!doctype html>
     .message-header { display: flex; gap: .75rem; align-items: baseline; margin-bottom: .75rem; }
     .role { font-weight: bold; }
     .timestamp { color: #666; font-size: .8rem; }
-    .message-body { overflow-wrap: anywhere; }
-    .message-body pre { overflow-x: auto; }
+    .message-body { min-width: 0; overflow-wrap: anywhere; }
+    .message-body p, .message-body ol, .message-body ul { margin-block-start: 0.5em; margin-block-end: 0.5em; }
+    .message-body pre, .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+    .katex-display > .katex { white-space: nowrap; }
     .copy { margin-top: .75rem; }
     .status { color: #555; }
     @media (max-width: 800px) {
@@ -174,13 +176,43 @@ PAGE = r"""<!doctype html>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/lib/marked.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js"></script>
   <script>
     const sessionsElement = document.querySelector('#sessions');
     const tocElement = document.querySelector('#toc');
     const messagesElement = document.querySelector('#messages');
     let knownSessions = new Set();
     let requestVersion = 0;
+    const mathExtensions = [
+      {
+        name: 'displayMath',
+        level: 'block',
+        start(src) { return src.indexOf('\\['); },
+        tokenizer(src) {
+          if (!src.startsWith('\\[')) return;
+          const end = src.indexOf('\\]');
+          if (end < 2) return;
+          return { type: 'displayMath', raw: src.slice(0, end + 2), text: src.slice(2, end) };
+        },
+        renderer(token) {
+          return katex.renderToString(token.text, { displayMode: true, throwOnError: false });
+        }
+      },
+      {
+        name: 'inlineMath',
+        level: 'inline',
+        start(src) { return src.indexOf('\\('); },
+        tokenizer(src) {
+          if (!src.startsWith('\\(')) return;
+          const end = src.indexOf('\\)');
+          if (end < 2) return;
+          return { type: 'inlineMath', raw: src.slice(0, end + 2), text: src.slice(2, end) };
+        },
+        renderer(token) {
+          return katex.renderToString(token.text, { displayMode: false, throwOnError: false });
+        }
+      }
+    ];
+    marked.use({ extensions: mathExtensions });
 
     function selectedPath() {
       const match = location.hash.match(/^#session=(.*)$/);
@@ -213,13 +245,6 @@ PAGE = r"""<!doctype html>
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
       })[character]);
       element.innerHTML = marked.parse(markdown, { renderer, gfm: true });
-      renderMathInElement(element, {
-        delimiters: [
-          { left: '\\(', right: '\\)', display: false },
-          { left: '\\[', right: '\\]', display: true }
-        ],
-        throwOnError: false
-      });
     }
 
     async function copyMarkdown(button, text) {
@@ -293,7 +318,9 @@ PAGE = r"""<!doctype html>
           link.textContent = shortPrompt(message.text);
           link.addEventListener('click', event => {
             event.preventDefault();
-            document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
+            const target = document.getElementById(id);
+            const top = target.getBoundingClientRect().top - messagesElement.getBoundingClientRect().top + messagesElement.scrollTop;
+            messagesElement.scrollTo({ top, behavior: 'smooth' });
           });
           tocElement.append(link);
         }
