@@ -267,6 +267,20 @@ PAGE = r"""<!doctype html>
     let requestVersion = 0;
     const mathExtensions = [
       {
+        name: 'displayDollarMath',
+        level: 'block',
+        start(src) { return src.indexOf('$$'); },
+        tokenizer(src) {
+          if (!src.startsWith('$$')) return;
+          const end = src.indexOf('$$', 2);
+          if (end < 2) return;
+          return { type: 'displayDollarMath', raw: src.slice(0, end + 2), text: src.slice(2, end) };
+        },
+        renderer(token) {
+          return katex.renderToString(token.text, { displayMode: true, throwOnError: false });
+        }
+      },
+      {
         name: 'displayMath',
         level: 'block',
         start(src) { return src.indexOf('\\['); },
@@ -293,7 +307,26 @@ PAGE = r"""<!doctype html>
         renderer(token) {
           return katex.renderToString(token.text, { displayMode: false, throwOnError: false });
         }
-      }
+      },
+      {
+        name: 'inlineDollarMath',
+        level: 'inline',
+        start(src) {
+          let index = src.indexOf('$');
+          while (index >= 0 && src[index - 1] === '\\') index = src.indexOf('$', index + 1);
+          return index;
+        },
+        tokenizer(src) {
+          if (!src.startsWith('$') || src.startsWith('$$')) return;
+          let end = src.indexOf('$', 1);
+          while (end >= 0 && src[end - 1] === '\\') end = src.indexOf('$', end + 1);
+          if (end < 2) return;
+          return { type: 'inlineDollarMath', raw: src.slice(0, end + 1), text: src.slice(1, end) };
+        },
+        renderer(token) {
+          return katex.renderToString(token.text, { displayMode: false, throwOnError: false });
+        }
+      },
     ];
     marked.use({ extensions: mathExtensions });
 
