@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,6 +11,43 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 
 SESSIONS_DIR = Path.home() / ".omp" / "agent" / "sessions"
+UPLOADS_DIR = Path(tempfile.gettempdir()) / "omp"
+UPLOAD_SEQUENCE = 0
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+IMAGE_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+}
+
+
+class UploadError(ValueError):
+    def __init__(self, status: HTTPStatus, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def save_uploaded_image(content_type: str, data: bytes) -> Path:
+    content_type = content_type.split(";", 1)[0].strip().lower()
+    extension = IMAGE_EXTENSIONS.get(content_type)
+    if extension is None:
+        raise UploadError(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "只支持 PNG、JPEG、GIF、WebP 和 BMP 图片。")
+    if not data:
+        raise UploadError(HTTPStatus.BAD_REQUEST, "图片内容为空。")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise UploadError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "单张图片不能超过 20 MB。")
+
+    global UPLOAD_SEQUENCE
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    sequence = UPLOAD_SEQUENCE
+    UPLOAD_SEQUENCE = (UPLOAD_SEQUENCE + 1) % 100
+    path = UPLOADS_DIR / f"{sequence:02d}{extension}"
+    path.write_bytes(data)
+    return path
+
+
 
 
 def read_json_lines(path: Path):
@@ -139,7 +177,9 @@ PAGE = r"""<!doctype html>
     button { font: inherit; }
     #app { display: grid; grid-template-columns: 18rem minmax(0, 1fr); height: 100vh; min-height: 0; }
     #sessions { border-right: 1px solid #bbb; min-height: 0; overflow-y: auto; padding: 1rem; }
-    #sessions h1 { font-size: 1rem; margin: 0 0 1rem; }
+    .sidebar-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
+    .sidebar-header button { font-size: .8rem; padding: .25rem .45rem; }
+    #sessions h1 { font-size: 1rem; margin: 0; }
     .group { margin: 0 0 1.25rem; }
     .group h2 { font-size: .875rem; margin: 0 0 .5rem; overflow-wrap: anywhere; }
     .session-link { display: block; margin: .35rem 0; overflow-wrap: anywhere; }
@@ -158,6 +198,22 @@ PAGE = r"""<!doctype html>
     .message-body pre, .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
     .katex-display > .katex { white-space: nowrap; }
     .copy { margin-top: .75rem; }
+    dialog { border: 1px solid #999; border-radius: .35rem; max-width: min(42rem, calc(100vw - 2rem)); width: 100%; padding: 0; }
+    dialog::backdrop { background: rgb(0 0 0 / .35); }
+    .upload-panel { padding: 1.25rem; }
+    .upload-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .upload-header h2 { font-size: 1.1rem; margin: 0; }
+    .upload-header button { border: 0; background: transparent; cursor: pointer; padding: .25rem; }
+    .upload-hint { color: #555; margin: .75rem 0; }
+    .upload-dropzone { border: 1px dashed #888; padding: 1rem; text-align: center; cursor: pointer; }
+    .upload-dropzone:focus, .upload-dropzone:hover { background: #f5f5f5; }
+    .upload-list { display: grid; gap: .6rem; margin: 1rem 0; max-height: 18rem; overflow-y: auto; }
+    .upload-item { display: grid; grid-template-columns: 4rem minmax(0, 1fr); gap: .75rem; align-items: center; }
+    .upload-preview { width: 4rem; height: 4rem; object-fit: contain; border: 1px solid #ddd; background: #f5f5f5; }
+    .upload-name, .upload-path { display: block; overflow-wrap: anywhere; }
+    .upload-path { color: #555; font-family: monospace; font-size: .8rem; }
+    .upload-actions { display: flex; justify-content: flex-end; gap: .5rem; }
+    .upload-actions button { padding: .4rem .7rem; }
     .status { color: #555; }
     @media (max-width: 800px) {
       #app { grid-template-columns: 12rem minmax(0, 1fr); }
@@ -168,12 +224,28 @@ PAGE = r"""<!doctype html>
 </head>
 <body>
   <main id="app">
-    <nav id="sessions" aria-label="会话列表"><h1>会话</h1><p class="status">加载中…</p></nav>
+    <nav id="sessions" aria-label="会话列表"><div class="sidebar-header"><h1>会话</h1><button id="upload-open" type="button">上传图片</button></div><p class="status">加载中…</p></nav>
     <section id="viewer">
       <nav id="toc" aria-label="用户输入目录"><h2>目录</h2><p class="status">选择一个会话。</p></nav>
       <article id="messages" aria-live="polite"><p class="status">选择一个会话。</p></article>
     </section>
   </main>
+<dialog id="upload-dialog" aria-labelledby="upload-title">
+  <form class="upload-panel">
+    <div class="upload-header">
+      <h2 id="upload-title">上传图片</h2>
+      <button id="upload-close" type="button">关闭</button>
+    </div>
+    <p class="upload-hint">可以选择图片，也可以把图片复制后在这里按 Ctrl+V；支持一次粘贴多张图片。</p>
+    <input id="upload-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
+    <div id="upload-dropzone" class="upload-dropzone" role="button" tabindex="0">选择图片</div>
+    <div id="upload-list" class="upload-list" aria-live="polite"><p class="status">还没有图片。</p></div>
+    <div class="upload-actions">
+      <button id="upload-clear" type="button">清空</button>
+      <button id="upload-copy" type="button" disabled>复制全部路径</button>
+    </div>
+  </form>
+</dialog>
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/lib/marked.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
   <script>
@@ -181,6 +253,16 @@ PAGE = r"""<!doctype html>
     const tocElement = document.querySelector('#toc');
     const messagesElement = document.querySelector('#messages');
     let knownSessions = new Set();
+    const uploadDialog = document.querySelector('#upload-dialog');
+    const uploadOpenButton = document.querySelector('#upload-open');
+    const uploadCloseButton = document.querySelector('#upload-close');
+    const uploadInput = document.querySelector('#upload-input');
+    const uploadDropzone = document.querySelector('#upload-dropzone');
+    const uploadList = document.querySelector('#upload-list');
+    const uploadClearButton = document.querySelector('#upload-clear');
+    const uploadCopyButton = document.querySelector('#upload-copy');
+    let uploadItems = [];
+    let uploadSequence = 0;
     let requestVersion = 0;
     const mathExtensions = [
       {
@@ -265,6 +347,117 @@ PAGE = r"""<!doctype html>
       setTimeout(() => { button.textContent = originalLabel; }, 1200);
     }
 
+    function renderUploadList() {
+      uploadList.replaceChildren();
+      if (!uploadItems.length) {
+        const empty = document.createElement('p');
+        empty.className = 'status';
+        empty.textContent = '还没有图片。';
+        uploadList.append(empty);
+      }
+
+      uploadItems.forEach(item => {
+        const row = document.createElement('article');
+        row.className = 'upload-item';
+        const preview = document.createElement('img');
+        preview.className = 'upload-preview';
+        preview.src = item.previewUrl;
+        preview.alt = item.name;
+        const details = document.createElement('div');
+        const name = document.createElement('strong');
+        name.className = 'upload-name';
+        name.textContent = item.name;
+        const status = document.createElement('span');
+        status.className = item.error ? 'status upload-name' : 'upload-name';
+        status.textContent = item.error || item.status;
+        details.append(name, status);
+        if (item.path) {
+          const path = document.createElement('code');
+          path.className = 'upload-path';
+          path.textContent = `@${item.path}`;
+          details.append(path);
+        }
+        row.append(preview, details);
+        uploadList.append(row);
+      });
+
+      uploadCopyButton.disabled = !uploadItems.some(item => item.path);
+    }
+
+    async function uploadImage(item) {
+      item.status = '上传中…';
+      renderUploadList();
+      try {
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': item.file.type },
+          body: item.file
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `上传失败：${response.status}`);
+        item.path = data.path;
+        item.status = '已上传';
+      } catch (error) {
+        item.error = error.message || '上传失败。';
+      }
+      renderUploadList();
+    }
+
+    function addUploadFiles(files) {
+      [...files].filter(file => file && file.type.startsWith('image/')).forEach(file => {
+        const item = {
+          id: ++uploadSequence,
+          file,
+          name: file.name || `粘贴图片 ${uploadSequence}`,
+          previewUrl: URL.createObjectURL(file),
+          status: '等待上传',
+          path: '',
+          error: ''
+        };
+        uploadItems.push(item);
+        void uploadImage(item);
+      });
+      renderUploadList();
+    }
+
+    function clearUploads() {
+      uploadItems.forEach(item => URL.revokeObjectURL(item.previewUrl));
+      uploadItems = [];
+      renderUploadList();
+    }
+
+    uploadOpenButton.addEventListener('click', () => {
+      uploadDialog.showModal();
+      uploadDropzone.focus();
+    });
+    uploadCloseButton.addEventListener('click', () => uploadDialog.close());
+    uploadClearButton.addEventListener('click', clearUploads);
+    uploadInput.addEventListener('change', () => {
+      addUploadFiles(uploadInput.files);
+      uploadInput.value = '';
+    });
+    uploadDropzone.addEventListener('click', () => uploadInput.click());
+    uploadDropzone.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        uploadInput.click();
+      }
+    });
+    uploadDialog.addEventListener('paste', event => {
+      const files = [...(event.clipboardData?.items || [])]
+        .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+        .map(item => item.getAsFile())
+        .filter(Boolean);
+      if (files.length) {
+        event.preventDefault();
+        addUploadFiles(files);
+      }
+    });
+    uploadCopyButton.addEventListener('click', () => {
+      const paths = uploadItems.filter(item => item.path).map(item => `@${item.path}`).join(' ');
+      if (paths) void copyMarkdown(uploadCopyButton, paths);
+    });
+    renderUploadList();
     function renderConversation(messages) {
       tocElement.replaceChildren();
       messagesElement.replaceChildren();
@@ -365,10 +558,8 @@ PAGE = r"""<!doctype html>
       try {
         const groups = await fetchJson('/api/sessions');
         knownSessions = new Set();
-        sessionsElement.replaceChildren();
-        const heading = document.createElement('h1');
-        heading.textContent = '会话';
-        sessionsElement.append(heading);
+        const header = sessionsElement.querySelector('.sidebar-header');
+        sessionsElement.replaceChildren(header);
 
         groups.forEach(group => {
           const groupElement = document.createElement('section');
@@ -447,6 +638,31 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"messages": messages})
         else:
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "不存在的路径。"})
+    def do_POST(self) -> None:
+        request = urlparse(self.path)
+        if request.path != "/api/upload":
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "不存在的路径。"})
+            return
+
+        content_length = self.headers.get("Content-Length")
+        try:
+            length = int(content_length) if content_length is not None else -1
+        except ValueError:
+            length = -1
+        if length < 0:
+            self.send_json(HTTPStatus.LENGTH_REQUIRED, {"error": "请求缺少 Content-Length。"})
+            return
+        if length > MAX_IMAGE_BYTES:
+            self.send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "单张图片不能超过 20 MB。"})
+            return
+
+        data = self.rfile.read(length)
+        try:
+            path = save_uploaded_image(self.headers.get("Content-Type", ""), data)
+        except UploadError as error:
+            self.send_json(error.status, {"error": str(error)})
+            return
+        self.send_json(HTTPStatus.CREATED, {"path": str(path)})
 
 
 def main() -> None:
