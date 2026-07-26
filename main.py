@@ -396,10 +396,15 @@ PAGE = r"""<!doctype html>
         fallback.value = text;
         fallback.style.position = 'fixed';
         fallback.style.opacity = '0';
-        document.body.append(fallback);
-        fallback.select();
-        document.execCommand('copy');
-        fallback.remove();
+        const host = button.closest('dialog[open]') ?? document.body;
+        host.append(fallback);
+        try {
+          fallback.focus({ preventScroll: true });
+          fallback.select();
+          if (!document.execCommand('copy')) throw new Error('无法复制到剪贴板。');
+        } finally {
+          fallback.remove();
+        }
       }
       const originalLabel = button.textContent;
       button.textContent = '已复制';
