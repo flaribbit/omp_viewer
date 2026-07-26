@@ -183,12 +183,14 @@ PAGE = r"""<!doctype html>
     .group { margin: 0 0 1.25rem; }
     .group h2 { font-size: .875rem; margin: 0 0 .5rem; overflow-wrap: anywhere; }
     .session-link { display: block; margin: .35rem 0; overflow-wrap: anywhere; }
-    .session-link[aria-current="page"] { font-weight: bold; }
+    .session-link[aria-current] { font-weight: bold; }
     #viewer { display: grid; grid-template-columns: 14rem minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
     #toc { border-right: 1px solid #bbb; min-height: 0; overflow-y: auto; padding: 1rem; }
-    #toc h2 { font-size: 1rem; margin: 0 0 1rem; }
+    .toc-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
+    .toc-header button { font-size: .8rem; padding: .25rem .45rem; }
+    #toc h2 { font-size: 1rem; margin: 0; }
     .toc-link { display: block; margin: .4rem 0; overflow-wrap: anywhere; }
-    #messages { min-height: 0; overflow-y: auto; padding: 1rem 2rem; scroll-behavior: smooth; }
+    #messages { min-height: 0; overflow-y: auto; padding: 1rem 2rem; scroll-behavior: auto; }
     .message { border-bottom: 1px solid #ddd; padding: 0 0 1.25rem; margin: 0 0 1.25rem; }
     .message-header { display: flex; gap: .75rem; align-items: baseline; margin-bottom: .75rem; }
     .role { font-weight: bold; }
@@ -227,7 +229,7 @@ PAGE = r"""<!doctype html>
   <main id="app">
     <nav id="sessions" aria-label="会话列表"><div class="sidebar-header"><h1>会话</h1><button id="upload-open" type="button">上传图片</button></div><p class="status">加载中…</p></nav>
     <section id="viewer">
-      <nav id="toc" aria-label="用户输入目录"><h2>目录</h2><p class="status">选择一个会话。</p></nav>
+      <nav id="toc" aria-label="用户输入目录"><div class="toc-header"><h2>目录</h2><button id="refresh-sessions" type="button">刷新</button></div><p class="status">选择一个会话。</p></nav>
       <article id="messages" aria-live="polite"><p class="status">选择一个会话。</p></article>
     </section>
   </main>
@@ -316,6 +318,31 @@ PAGE = r"""<!doctype html>
       status.textContent = text;
       element.append(status);
     }
+    function createTocHeader() {
+      const header = document.createElement('div');
+      header.className = 'toc-header';
+      const heading = document.createElement('h2');
+      heading.textContent = '目录';
+      const refresh = document.createElement('button');
+      refresh.id = 'refresh-sessions';
+      refresh.type = 'button';
+      refresh.textContent = '刷新';
+      header.append(heading, refresh);
+      return header;
+    }
+
+    function clearTocStatus(text) {
+      tocElement.replaceChildren(createTocHeader());
+      const status = document.createElement('p');
+      status.className = 'status';
+      status.textContent = text;
+      tocElement.append(status);
+    }
+
+    tocElement.addEventListener('click', event => {
+      if (event.target.closest('#refresh-sessions')) loadIndex(true);
+    });
+
 
     function shortPrompt(text) {
       const compact = text.trim().replace(/\s+/g, ' ');
@@ -473,11 +500,8 @@ PAGE = r"""<!doctype html>
     });
     renderUploadList();
     function renderConversation(messages) {
-      tocElement.replaceChildren();
+      tocElement.replaceChildren(createTocHeader());
       messagesElement.replaceChildren();
-      const heading = document.createElement('h2');
-      heading.textContent = '目录';
-      tocElement.append(heading);
 
       if (!messages.length) {
         clearAndStatus(messagesElement, '这个会话没有可显示的文本对话。');
@@ -527,7 +551,7 @@ PAGE = r"""<!doctype html>
             event.preventDefault();
             const target = document.getElementById(id);
             const top = target.getBoundingClientRect().top - messagesElement.getBoundingClientRect().top + messagesElement.scrollTop;
-            messagesElement.scrollTo({ top, behavior: 'smooth' });
+            messagesElement.scrollTo({ top, behavior: 'auto' });
           });
           tocElement.append(link);
         }
@@ -541,34 +565,37 @@ PAGE = r"""<!doctype html>
       }
     }
 
-    async function loadSelectedSession() {
+    async function loadSelectedSession(scrollToBottom = true) {
       const path = selectedPath();
       if (!path) {
-        clearAndStatus(tocElement, '选择一个会话。');
+        clearTocStatus('选择一个会话。');
         clearAndStatus(messagesElement, '选择一个会话。');
         return;
       }
       if (!knownSessions.has(path)) {
-        clearAndStatus(tocElement, '会话不存在。');
+        clearTocStatus('会话不存在。');
         clearAndStatus(messagesElement, '会话不存在或已被删除。');
         return;
       }
 
       const version = ++requestVersion;
-      clearAndStatus(tocElement, '加载中…');
+      clearTocStatus('加载中…');
       clearAndStatus(messagesElement, '加载中…');
       try {
         const data = await fetchJson(`/api/session?path=${encodeURIComponent(path)}`);
-        if (version === requestVersion) renderConversation(data.messages);
+        if (version === requestVersion) {
+          renderConversation(data.messages);
+          if (scrollToBottom) messagesElement.scrollTo({ top: messagesElement.scrollHeight, behavior: 'auto' });
+        }
       } catch (error) {
         if (version === requestVersion) {
-          clearAndStatus(tocElement, '无法加载会话。');
+          clearTocStatus('无法加载会话。');
           clearAndStatus(messagesElement, error.message);
         }
       }
     }
 
-    async function loadIndex() {
+    async function loadIndex(scrollToBottom = true) {
       try {
         const groups = await fetchJson('/api/sessions');
         knownSessions = new Set();
@@ -599,7 +626,7 @@ PAGE = r"""<!doctype html>
           status.textContent = '未找到会话。';
           sessionsElement.append(status);
         }
-        loadSelectedSession();
+        await loadSelectedSession(scrollToBottom);
       } catch (error) {
         clearAndStatus(sessionsElement, error.message);
       }
