@@ -208,10 +208,11 @@ PAGE = r"""<!doctype html>
     .upload-dropzone { border: 1px dashed #888; padding: 1rem; text-align: center; cursor: pointer; }
     .upload-dropzone:focus, .upload-dropzone:hover { background: #f5f5f5; }
     .upload-list { display: grid; gap: .6rem; margin: 1rem 0; max-height: 18rem; overflow-y: auto; }
-    .upload-item { display: grid; grid-template-columns: 4rem minmax(0, 1fr); gap: .75rem; align-items: center; }
+    .upload-item { display: grid; grid-template-columns: 4rem minmax(0, 1fr) auto; gap: .75rem; align-items: center; }
     .upload-preview { width: 4rem; height: 4rem; object-fit: contain; border: 1px solid #ddd; background: #f5f5f5; }
     .upload-name, .upload-path { display: block; overflow-wrap: anywhere; }
     .upload-path { color: #555; font-family: monospace; font-size: .8rem; }
+    .upload-remove { padding: .25rem .4rem; white-space: nowrap; }
     .upload-actions { display: flex; justify-content: flex-end; gap: .5rem; }
     .upload-actions button { padding: .4rem .7rem; }
     .status { color: #555; }
@@ -377,11 +378,24 @@ PAGE = r"""<!doctype html>
           path.textContent = `@${item.path}`;
           details.append(path);
         }
-        row.append(preview, details);
+        const remove = document.createElement('button');
+        remove.className = 'upload-remove';
+        remove.type = 'button';
+        remove.textContent = '删除';
+        remove.setAttribute('aria-label', `删除 ${item.name}`);
+        remove.addEventListener('click', () => removeUploadItem(item.id));
+        row.append(preview, details, remove);
         uploadList.append(row);
       });
 
       uploadCopyButton.disabled = !uploadItems.some(item => item.path);
+    }
+    function removeUploadItem(id) {
+      const index = uploadItems.findIndex(item => item.id === id);
+      if (index < 0) return;
+      const [item] = uploadItems.splice(index, 1);
+      URL.revokeObjectURL(item.previewUrl);
+      renderUploadList();
     }
 
     async function uploadImage(item) {
