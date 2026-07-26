@@ -178,8 +178,7 @@ PAGE = r"""<!doctype html>
     #app { display: grid; grid-template-columns: 18rem minmax(0, 1fr); height: 100vh; min-height: 0; }
     #sessions { border-right: 1px solid #bbb; min-height: 0; overflow-y: auto; padding: 1rem; }
     .sidebar-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
-    .sidebar-header button { font-size: .8rem; padding: .25rem .45rem; }
-    #sessions h1 { font-size: 1rem; margin: 0; }
+    #sessions h2 { margin: 0; }
     .group { margin: 0 0 1.25rem; }
     .group h2 { font-size: .875rem; margin: 0 0 .5rem; overflow-wrap: anywhere; }
     .session-link { display: block; margin: .35rem 0; overflow-wrap: anywhere; }
@@ -187,8 +186,7 @@ PAGE = r"""<!doctype html>
     #viewer { display: grid; grid-template-columns: 14rem minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
     #toc { border-right: 1px solid #bbb; min-height: 0; overflow-y: auto; padding: 1rem; }
     .toc-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
-    .toc-header button { font-size: .8rem; padding: .25rem .45rem; }
-    #toc h2 { font-size: 1rem; margin: 0; }
+    #toc h2 { margin: 0; }
     .toc-link { display: block; margin: .4rem 0; overflow-wrap: anywhere; }
     #messages { min-height: 0; overflow-y: auto; padding: 1rem 2rem; scroll-behavior: auto; }
     .message { border-bottom: 1px solid #ddd; padding: 0 0 1.25rem; margin: 0 0 1.25rem; }
@@ -227,7 +225,7 @@ PAGE = r"""<!doctype html>
 </head>
 <body>
   <main id="app">
-    <nav id="sessions" aria-label="会话列表"><div class="sidebar-header"><h1>会话</h1><button id="upload-open" type="button">上传图片</button></div><p class="status">加载中…</p></nav>
+    <nav id="sessions" aria-label="会话列表"><div class="sidebar-header"><h2>会话</h2><button id="upload-open" type="button">上传图片</button></div><p class="status">加载中…</p></nav>
     <section id="viewer">
       <nav id="toc" aria-label="用户输入目录"><div class="toc-header"><h2>目录</h2><button id="refresh-sessions" type="button">刷新</button></div><p class="status">选择一个会话。</p></nav>
       <article id="messages" aria-live="polite"><p class="status">选择一个会话。</p></article>
@@ -535,7 +533,7 @@ PAGE = r"""<!doctype html>
         const copy = document.createElement('button');
         copy.className = 'copy';
         copy.type = 'button';
-        copy.textContent = '复制 Markdown';
+        copy.textContent = '复制';
         copy.addEventListener('click', () => copyMarkdown(copy, message.text));
 
         messageElement.append(header, body, copy);
