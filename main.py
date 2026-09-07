@@ -178,11 +178,12 @@ PAGE = r"""<!doctype html>
     #app { display: grid; grid-template-columns: 18rem minmax(0, 1fr); height: 100vh; min-height: 0; }
     #sessions { border-right: 1px solid #bbb; min-height: 0; overflow-y: auto; padding: 1rem; }
     .sidebar-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
+    .sidebar-actions { display: flex; align-items: center; gap: .5rem; }
     #sessions h2 { margin: 0; }
     .group { margin: 0 0 1.25rem; }
     .group h2 { font-size: .875rem; margin: 0 0 .5rem; overflow-wrap: anywhere; }
     .session-link { display: block; margin: .35rem 0; overflow-wrap: anywhere; }
-    .session-link[aria-current] { font-weight: bold; }
+    .session-link[aria-current] { color: #06c; font-weight: bold; }
     #viewer { display: grid; grid-template-columns: 14rem minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; }
     #toc { border-right: 1px solid #bbb; min-height: 0; overflow-y: auto; padding: 1rem; }
     .toc-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
@@ -225,7 +226,7 @@ PAGE = r"""<!doctype html>
 </head>
 <body>
   <main id="app">
-    <nav id="sessions" aria-label="会话列表"><div class="sidebar-header"><h2>会话</h2><button id="upload-open" type="button">上传图片</button></div><p class="status">加载中…</p></nav>
+    <nav id="sessions" aria-label="会话列表"><div class="sidebar-header"><h2>会话</h2><div class="sidebar-actions"><button id="jump-active" type="button" disabled>跳转</button><button id="upload-open" type="button">上传图片</button></div></div><p class="status">加载中…</p></nav>
     <section id="viewer">
       <nav id="toc" aria-label="用户输入目录"><div class="toc-header"><h2>目录</h2><button id="refresh-sessions" type="button">刷新</button></div><p class="status">选择一个会话。</p></nav>
       <article id="messages" aria-live="polite"><p class="status">选择一个会话。</p></article>
@@ -251,6 +252,7 @@ PAGE = r"""<!doctype html>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
   <script>
     const sessionsElement = document.querySelector('#sessions');
+    const jumpActiveButton = document.querySelector('#jump-active');
     const tocElement = document.querySelector('#toc');
     const messagesElement = document.querySelector('#messages');
     let knownSessions = new Set();
@@ -334,6 +336,14 @@ PAGE = r"""<!doctype html>
       const match = location.hash.match(/^#session=(.*)$/);
       if (!match) return null;
       try { return decodeURIComponent(match[1]); } catch { return null; }
+    }
+
+    function activeSessionLink() {
+      return sessionsElement.querySelector('.session-link[aria-current]');
+    }
+
+    function updateJumpButton() {
+      jumpActiveButton.disabled = !activeSessionLink();
     }
 
     async function fetchJson(url) {
@@ -503,6 +513,9 @@ PAGE = r"""<!doctype html>
       renderUploadList();
     }
 
+    jumpActiveButton.addEventListener('click', () => {
+      activeSessionLink()?.scrollIntoView({ behavior: 'auto', block: 'center' });
+    });
     uploadOpenButton.addEventListener('click', () => {
       uploadDialog.showModal();
       uploadDropzone.focus();
@@ -662,6 +675,7 @@ PAGE = r"""<!doctype html>
           status.textContent = '未找到会话。';
           sessionsElement.append(status);
         }
+        updateJumpButton();
         await loadSelectedSession(scrollToBottom);
       } catch (error) {
         clearAndStatus(sessionsElement, error.message);
@@ -672,6 +686,7 @@ PAGE = r"""<!doctype html>
       document.querySelectorAll('.session-link').forEach(link => {
         link.toggleAttribute('aria-current', link.href.endsWith(location.hash));
       });
+      updateJumpButton();
       loadSelectedSession();
     });
     loadIndex();
